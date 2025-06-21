@@ -1,0 +1,225 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id                String          @id @default(uuid())
+  email             String          @unique
+  passwordHash      String
+  firstName         String
+  lastName          String
+  phoneNumber       String?
+  profileImageUrl   String?
+  timeZone          String          @default("UTC")
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+  
+  // Relations
+  bandMemberships   BandMembership[]
+  availability      UserAvailability[]
+  exceptions        AvailabilityException[]
+  createdBands      Band[]           @relation("BandCreator")
+  createdRehearsals Rehearsal[]      @relation("RehearsalCreator")
+  attendance        RehearsalAttendance[]
+  resources         RehearsalResource[] @relation("ResourceUploader")
+  notifications     Notification[]
+}
+
+model Band {
+  id               String            @id @default(uuid())
+  name             String
+  description      String?
+  creatorId        String
+  profileImageUrl  String?
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+  
+  // Relations
+  creator          User              @relation("BandCreator", fields: [creatorId], references: [id])
+  members          BandMembership[]
+  rehearsals       Rehearsal[]
+  venues           Venue[]
+}
+
+model BandMembership {
+  id              String            @id @default(uuid())
+  bandId          String
+  userId          String
+  role            MemberRole        @default(MEMBER)
+  joinDate        DateTime          @default(now())
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+  
+  // Relations
+  band            Band              @relation(fields: [bandId], references: [id], onDelete: Cascade)
+  user            User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  @@unique([bandId, userId])
+}
+
+model UserAvailability {
+  id           String       @id @default(uuid())
+  userId       String
+  dayOfWeek    Int          // 0-6 for Sunday-Saturday
+  startTime    String       // Format: "HH:MM" in 24h
+  endTime      String       // Format: "HH:MM" in 24h
+  recurring    Boolean      @default(true)
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+  
+  // Relations
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  @@index([userId, dayOfWeek])
+}
+
+model AvailabilityException {
+  id           String       @id @default(uuid())
+  userId       String
+  date         DateTime
+  available    Boolean      @default(false)
+  startTime    String?      // Format: "HH:MM" in 24h
+  endTime      String?      // Format: "HH:MM" in 24h
+  reason       String?
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+  
+  // Relations
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  @@index([userId, date])
+}
+
+model Rehearsal {
+  id               String               @id @default(uuid())
+  bandId           String
+  venueId          String?
+  startTime        DateTime
+  endTime          DateTime
+  status           RehearsalStatus      @default(SCHEDULED)
+  createdById      String
+  title            String?
+  description      String?
+  isRecurring      Boolean              @default(false)
+  recurringPattern String?              // JSON string with recurring pattern
+  createdAt        DateTime             @default(now())
+  updatedAt        DateTime             @updatedAt
+  
+  // Relations
+  band             Band                 @relation(fields: [bandId], references: [id], onDelete: Cascade)
+  venue            Venue?               @relation(fields: [venueId], references: [id])
+  createdBy        User                 @relation("RehearsalCreator", fields: [createdById], references: [id])
+  attendance       RehearsalAttendance[]
+  resources        RehearsalResource[]
+  
+  @@index([bandId, startTime])
+}
+
+model RehearsalAttendance {
+  id           String         @id @default(uuid())
+  rehearsalId  String
+  userId       String
+  status       AttendanceStatus @default(NO_RESPONSE)
+  updatedAt    DateTime       @updatedAt
+  
+  // Relations
+  rehearsal    Rehearsal      @relation(fields: [rehearsalId], references: [id], onDelete: Cascade)
+  user         User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  @@unique([rehearsalId, userId])
+}
+
+model Venue {
+  id           String        @id @default(uuid())
+  bandId       String?       // If null, it's a public venue
+  name         String
+  address      String?
+  city         String?
+  state        String?
+  zipCode      String?
+  country      String?
+  coordinates  String?       // JSON string with lat/lng
+  hourlyCost   Decimal?      @db.Decimal(10, 2)
+  notes        String?
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+  
+  // Relations
+  band         Band?         @relation(fields: [bandId], references: [id], onDelete: SetNull)
+  rehearsals   Rehearsal[]
+}
+
+model RehearsalResource {
+  id             String        @id @default(uuid())
+  rehearsalId    String
+  name           String
+  type           ResourceType
+  content        String?       // For notes or links
+  fileUrl        String?       // For uploaded files
+  uploadedById   String
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+  
+  // Relations
+  rehearsal      Rehearsal     @relation(fields: [rehearsalId], references: [id], onDelete: Cascade)
+  uploadedBy     User          @relation("ResourceUploader", fields: [uploadedById], references: [id])
+}
+
+model Notification {
+  id           String        @id @default(uuid())
+  userId       String
+  type         NotificationType
+  relatedId    String?       // ID of related resource (e.g., rehearsal_id)
+  message      String
+  read         Boolean       @default(false)
+  createdAt    DateTime      @default(now())
+  
+  // Relations
+  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  @@index([userId, read])
+}
+
+enum MemberRole {
+  LEADER
+  ADMIN
+  MEMBER
+}
+
+enum RehearsalStatus {
+  SCHEDULED
+  CANCELLED
+  COMPLETED
+}
+
+enum AttendanceStatus {
+  CONFIRMED
+  DECLINED
+  MAYBE
+  NO_RESPONSE
+}
+
+enum ResourceType {
+  FILE
+  LINK
+  NOTE
+}
+
+enum NotificationType {
+  REHEARSAL_CREATED
+  REHEARSAL_UPDATED
+  REHEARSAL_CANCELLED
+  REHEARSAL_REMINDER
+  BAND_INVITATION
+  ATTENDANCE_UPDATED
+  RESOURCE_ADDED
+  GENERAL
+}
